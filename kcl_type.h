@@ -57,5 +57,6 @@ typedef long long kcl_loff_t;
 #ifndef ESX
 typedef void* KCL_SEMA_Handle;
 #endif
+typedef void* KCL_NOTIFIER_BLOCKER;
 
 #endif

@@ -82,7 +82,7 @@ static int firegl_acpi_video_event(struct notifier_block *nb, unsigned long val,
     entry = (struct acpi_bus_event *)data;
     if ( !strcmp(entry->device_class, KCL_ACPI_VIDEO_CLASS) )
     {            
-        ctx_handle = firegl_query_busid(entry->bus_id, KCL_ACPI_VIDEO_CLASS);
+        ctx_handle = firegl_query_acpi_handle((KCL_NOTIFIER_BLOCKER)nb, KCL_ACPI_VIDEO_CLASS);
         if (ctx_handle == NULL)
         {
             KCL_DEBUG_ERROR ("Could not find private acpi context by video busid: %s\n", entry->bus_id);
@@ -94,10 +94,6 @@ static int firegl_acpi_video_event(struct notifier_block *nb, unsigned long val,
     }
     return NOTIFY_OK;
 }
-
-static struct notifier_block firegl_acpi_video_notifier = {
-        .notifier_call = firegl_acpi_video_event,
-};
 
 /** \brief kernel call back function when acpi ac events happen
  * \param nb Notifier block from kernel. Not used in driver.
@@ -115,7 +111,7 @@ static int firegl_acpi_ac_event(struct notifier_block *nb, unsigned long val,
     entry = (struct acpi_bus_event *)data;
     if ( !strcmp(entry->device_class, KCL_ACPI_AC_CLASS) )
     {            
-        ctx_handle = firegl_query_busid(entry->bus_id, KCL_ACPI_AC_CLASS);
+        ctx_handle = firegl_query_acpi_handle((KCL_NOTIFIER_BLOCKER)nb, KCL_ACPI_AC_CLASS);
         if (ctx_handle == NULL)
         {
             KCL_DEBUG_ERROR ("Could not find private acpi context by ac_adpater busid: %s\n", entry->bus_id);
@@ -128,11 +124,6 @@ static int firegl_acpi_ac_event(struct notifier_block *nb, unsigned long val,
     }
     return NOTIFY_OK;
 }
-
-static struct notifier_block firegl_acpi_ac_notifier = {
-        .notifier_call = firegl_acpi_ac_event,
-};
-
 
 static int firegl_acpi_lid_event(struct notifier_block *nb, unsigned long val,
                                void *data)
@@ -382,7 +373,8 @@ void* KCL_ACPI_GetVfctBios(unsigned long *size)
 unsigned int ATI_API_CALL KCL_ACPI_InstallHandler(KCL_ACPI_DevHandle device,
                                                   unsigned int handler_type,
                                                   KCL_ACPI_CallbackHandle handler,
-                                                  KCL_ACPI_ContextHandle context)
+                                                  KCL_ACPI_ContextHandle context,
+                                                  KCL_NOTIFIER_BLOCKER *nb)
 {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,29)
     return acpi_install_notify_handler(device, handler_type, (acpi_notify_handler)handler, context);
@@ -393,13 +385,27 @@ unsigned int ATI_API_CALL KCL_ACPI_InstallHandler(KCL_ACPI_DevHandle device,
     if ((KCL_ACPI_GetDevHandle(device, "_DOD", &dummy_handle) == KCL_ACPI_OK)
         || (KCL_ACPI_GetDevHandle(device, "_DOS", &dummy_handle) == KCL_ACPI_OK))
     {
-        return register_acpi_notifier(&firegl_acpi_video_notifier);
+        *nb = kmalloc(sizeof(struct notifier_block), GFP_KERNEL);
+        if (!*nb)
+        {
+            KCL_DEBUG_ERROR ("Could not allocate enough memory for video notifier_block\n");
+            return -ENOMEM;
+        }
+        ((struct notifier_block*)(*nb))->notifier_call = firegl_acpi_video_event;
+        return register_acpi_notifier((struct notifier_block*)(*nb));
     }
 
     //register notifier chain for ac adapter events
     if (KCL_ACPI_GetDevHandle(device, "_PSR", &dummy_handle) == KCL_ACPI_OK)
     {
-        return register_acpi_notifier(&firegl_acpi_ac_notifier);
+        *nb = kmalloc(sizeof(struct notifier_block), GFP_KERNEL);
+        if (!*nb)
+        {
+            KCL_DEBUG_ERROR ("Could not allocate enough memory for ac notifier_block\n");
+            return -ENOMEM;
+        }
+        ((struct notifier_block*)(*nb))->notifier_call = firegl_acpi_ac_event;
+        return register_acpi_notifier((struct notifier_block*)(*nb));
     }
 
     return 0;
@@ -414,27 +420,33 @@ unsigned int ATI_API_CALL KCL_ACPI_InstallHandler(KCL_ACPI_DevHandle device,
  */
 unsigned int ATI_API_CALL KCL_ACPI_RemoveHandler(KCL_ACPI_DevHandle device,
                                                  unsigned int handler_type,
-                                                 KCL_ACPI_CallbackHandle handler)
+                                                 KCL_ACPI_CallbackHandle handler,
+                                                 KCL_NOTIFIER_BLOCKER *nb)
 {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,29)
     return acpi_remove_notify_handler(device, handler_type, (acpi_notify_handler)handler);
 #else
     KCL_ACPI_DevHandle dummy_handle;
+    int ret = 0;
 
     //unregister notifier chain for video switching events
     if ((KCL_ACPI_GetDevHandle(device, "_DOD", &dummy_handle) == KCL_ACPI_OK)
         || (KCL_ACPI_GetDevHandle(device, "_DOS", &dummy_handle) == KCL_ACPI_OK))
     {
-        return unregister_acpi_notifier(&firegl_acpi_video_notifier);
+        ret = unregister_acpi_notifier((struct notifier_block*)(*nb));
+        kfree(*nb);
+        *nb = NULL;
     }
 
     //unregister notifier chain for ac adapter events
     if (KCL_ACPI_GetDevHandle(device, "_PSR", &dummy_handle) == KCL_ACPI_OK)
     {
-        return unregister_acpi_notifier(&firegl_acpi_ac_notifier);
+        ret = unregister_acpi_notifier((struct notifier_block*)(*nb));
+        kfree(*nb);
+        *nb = NULL;
     }
 
-    return 0;
+    return ret;
 #endif
 }
 
@@ -655,32 +667,6 @@ void KCL_ACPI_VideoNotify(KCL_ACPI_DevHandle handle, unsigned int event, KCL_ACP
     libip_video_notify(handle, event, data);
 }
 
-/** \brief Compare specified busid with busid of specified acpi handle
- * \param handle acpi handle
- * \param bus_id busid from acpi event
- * \return 0 if equal; 1 otherwise
- * */
-int ATI_API_CALL KCL_ACPI_Cmp_BusID(KCL_ACPI_DevHandle handle, KCL_ACPI_BusId bus_id)
-{
-    acpi_status status;
-    struct acpi_device *tdev;
-    int ret = 1;
-
-    status = acpi_bus_get_device(handle, &tdev);
-    if ( ACPI_SUCCESS(status) ) 
-    {
-        if ( !strcmp(tdev->pnp.bus_id, bus_id) )            
-        {
-            ret = 0;
-        }
-    }
-    else
-    {
-        KCL_DEBUG_ERROR ("Could not find device for handle: %p, status: 0x%x.\n", handle, status);
-    }
-    return (ret);
-}
-
 static unsigned int KCL_ACPI_videoDevice(KCL_ACPI_DevHandle handle)
 {
     KCL_ACPI_DevHandle dummy_handle;
@@ -793,11 +779,7 @@ unsigned int ATI_API_CALL KCL_ACPI_GetHandles(kcl_match_info_t *pInfo)
 {
 #if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,12)
     #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,8,0)
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,13,0)
         pInfo->video_handle = pInfo->pcidev->dev.acpi_node.handle;
-#else
-        pInfo->video_handle = pInfo->pcidev->dev.acpi_node.companion;
-#endif
     #elif LINUX_VERSION_CODE > KERNEL_VERSION(2,6,19)
         pInfo->video_handle = pInfo->pcidev->dev.archdata.acpi_handle;
     #else 
@@ -933,11 +915,6 @@ KCL_ACPI_DevHandle ATI_API_CALL KCL_ACPI_GetPeerDevice(KCL_ACPI_DevHandle handle
 void KCL_ACPI_VideoNotify(KCL_ACPI_DevHandle handle, unsigned int event, KCL_ACPI_ContextHandle data)
 {
     return NULL;
-}
-
-int ATI_API_CALL KCL_ACPI_Cmp_BusID(KCL_ACPI_DevHandle handle, KCL_ACPI_BusId bus_id)
-{
-    return (1);
 }
 
 unsigned int ATI_API_CALL KCL_ACPI_PowerXpressDevice(KCL_ACPI_DevHandle handle)

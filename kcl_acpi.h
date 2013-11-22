@@ -90,11 +90,13 @@ extern unsigned int ATI_API_CALL KCL_ACPI_EvalObject(KCL_ACPI_DevHandle handle,
 extern unsigned int ATI_API_CALL KCL_ACPI_InstallHandler(KCL_ACPI_DevHandle device,
                                                          unsigned int handler_type,
                                                          KCL_ACPI_CallbackHandle handler,
-                                                         KCL_ACPI_ContextHandle context);
+                                                         KCL_ACPI_ContextHandle context,
+                                                         KCL_NOTIFIER_BLOCKER *nb);
 
 extern unsigned int ATI_API_CALL KCL_ACPI_RemoveHandler(KCL_ACPI_DevHandle device,
                                                         unsigned int handler_type,
-                                                        KCL_ACPI_CallbackHandle handler);
+                                                        KCL_ACPI_CallbackHandle handler,
+                                                        KCL_NOTIFIER_BLOCKER *nb);
 extern unsigned int ATI_API_CALL KCL_ACPI_InstallLidHandler(void);
 extern unsigned int ATI_API_CALL KCL_ACPI_RemoveLidHandler(void);
 extern int ATI_API_CALL KCL_ACPI_Disabled(void);
@@ -105,7 +107,6 @@ extern void ATI_API_CALL KCL_ACPI_UpdateNotifyHandler(KCL_ACPI_DevHandle handle,
 extern void ATI_API_CALL KCL_ACPI_UpdateNotifyContext(KCL_ACPI_DevHandle handle, KCL_ACPI_ContextHandle context);
 extern KCL_ACPI_DevHandle ATI_API_CALL KCL_ACPI_GetChildDevice(KCL_ACPI_DevHandle handle);
 extern KCL_ACPI_DevHandle ATI_API_CALL KCL_ACPI_GetPeerDevice(KCL_ACPI_DevHandle handle);
-extern int ATI_API_CALL KCL_ACPI_Cmp_BusID(KCL_ACPI_DevHandle handle, KCL_ACPI_BusId bus_id);
 extern void* KCL_ACPI_GetVfctBios(unsigned long *size);
 
 // Callback functions called by kernel
@@ -124,6 +125,6 @@ extern int ATI_API_CALL KCL_ACPI_ParseTable(char *id, KCL_ACPI_IntCallbackHandle
 
 extern unsigned int ATI_API_CALL KCL_ACPI_PowerXpressDevice(KCL_ACPI_DevHandle handle);
 
-extern KCL_ACPI_ContextHandle ATI_API_CALL firegl_query_busid(KCL_ACPI_BusId busid, KCL_ACPI_DeviceClass devclass);
+extern KCL_ACPI_ContextHandle ATI_API_CALL firegl_query_acpi_handle(KCL_NOTIFIER_BLOCKER nb, KCL_ACPI_DeviceClass devclass);
 
 #endif
